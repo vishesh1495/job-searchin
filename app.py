@@ -14,12 +14,13 @@ from openpyxl.styles import Font
 # ─── Install Playwright browser on first run ────────────────────────────────
 @st.cache_resource(show_spinner="Setting up browser (first run only, ~30s)…")
 def _install_playwright():
+    # install-deps FIRST so system libraries are present before the browser binary runs
     subprocess.run(
-        [sys.executable, "-m", "playwright", "install", "chromium"],
+        [sys.executable, "-m", "playwright", "install-deps", "chromium"],
         capture_output=True, check=False
     )
     subprocess.run(
-        [sys.executable, "-m", "playwright", "install-deps", "chromium"],
+        [sys.executable, "-m", "playwright", "install", "chromium"],
         capture_output=True, check=False
     )
 
@@ -43,7 +44,7 @@ class JobRow:
     source_page: int
 
 
-# ─── Scraping helpers (ported from original script) ─────────────────────────
+# ─── Scraping helpers ────────────────────────────────────────────────────────
 def clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "")).strip()
 
@@ -298,6 +299,7 @@ def run_scraper(
     all_jobs: List[JobRow] = []
 
     with sync_playwright() as p:
+        # Use launch() + new_context() — works reliably on Streamlit Cloud
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -315,6 +317,7 @@ def run_scraper(
             if not email or not password:
                 log_fn("❌ Missing LinkedIn credentials.")
                 context.close()
+                browser.close()
                 return all_jobs
             log_fn("🔑 Logging into LinkedIn…")
             page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=30000)
@@ -330,11 +333,13 @@ def run_scraper(
                     "Please log in manually on linkedin.com first, then try again."
                 )
                 context.close()
+                browser.close()
                 return all_jobs
 
             if not is_logged_in(page):
                 log_fn("❌ Login failed. Please check your email and password.")
                 context.close()
+                browser.close()
                 return all_jobs
 
         log_fn("✅ Logged in successfully!")
