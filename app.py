@@ -321,7 +321,6 @@ def run_scraper(
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
-                "--single-process",
             ],
         )
         context = browser.new_context(viewport={"width": 1440, "height": 1000})
@@ -345,7 +344,11 @@ def run_scraper(
                 while current_page <= max_pages and len(role_jobs) < max_jobs:
                     search_url = build_search_url(role, location, start=start_offset)
                     log_fn(f"🔍 **{role}** in **{location}** — Page {current_page}")
-                    page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
+                    try:
+                        page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
+                    except Exception as e:
+                        log_fn(f"⚠️ Failed to load page: {e}. Skipping.")
+                        break
                     page.wait_for_timeout(2500)
 
                     jobs_list = detect_jobs_list(page)
