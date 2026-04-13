@@ -289,9 +289,24 @@ def is_logged_in(page) -> bool:
         return False
 
 
+def authenticate(page, li_at: str) -> bool:
+    """Inject the li_at session cookie — avoids login forms and CAPTCHA entirely."""
+    try:
+        page.goto("https://www.linkedin.com", wait_until="domcontentloaded", timeout=30000)
+        page.context.add_cookies([{
+            "name": "li_at",
+            "value": li_at.strip(),
+            "domain": ".linkedin.com",
+            "path": "/",
+        }])
+        return is_logged_in(page)
+    except Exception:
+        return False
+
+
 # ─── Main scraper ─────────────────────────────────────────────────────────────
 def run_scraper(
-    email: str, password: str,
+    li_at: str,
     roles: List[str], locations: List[str],
     max_jobs: int, max_pages: int,
     log_fn,
@@ -299,7 +314,6 @@ def run_scraper(
     all_jobs: List[JobRow] = []
 
     with sync_playwright() as p:
-        # Use launch() + new_context() — works reliably on Streamlit Cloud
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -313,34 +327,12 @@ def run_scraper(
         context = browser.new_context(viewport={"width": 1440, "height": 1000})
         page = context.new_page()
 
-        if not is_logged_in(page):
-            if not email or not password:
-                log_fn("❌ Missing LinkedIn credentials.")
-                context.close()
-                browser.close()
-                return all_jobs
-            log_fn("🔑 Logging into LinkedIn…")
-            page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(1500)
-            page.locator("#username").fill(email)
-            page.locator("#password").fill(password)
-            page.locator("button[type='submit']").click()
-            page.wait_for_timeout(4000)
-
-            if any(x in page.url.lower() for x in ["checkpoint", "challenge"]):
-                log_fn(
-                    "⚠️ LinkedIn requires additional verification (e.g. CAPTCHA or 2FA). "
-                    "Please log in manually on linkedin.com first, then try again."
-                )
-                context.close()
-                browser.close()
-                return all_jobs
-
-            if not is_logged_in(page):
-                log_fn("❌ Login failed. Please check your email and password.")
-                context.close()
-                browser.close()
-                return all_jobs
+        log_fn("🔑 Authenticating with LinkedIn…")
+        if not authenticate(page, li_at):
+            log_fn("❌ Authentication failed. Your cookie may be expired or incorrect. Please copy it again.")
+            context.close()
+            browser.close()
+            return all_jobs
 
         log_fn("✅ Logged in successfully!")
 
@@ -414,26 +406,32 @@ st.set_page_config(
 st.title("💼 LinkedIn Job Search")
 st.caption("Search LinkedIn jobs across multiple roles and locations, then download the results as Excel.")
 
-with st.expander("ℹ️ How it works", expanded=False):
+with st.expander("🍪 How to get your LinkedIn session cookie", expanded=True):
     st.markdown(
         """
-        1. Enter your LinkedIn email and password (used only to log in — nothing is stored).
-        2. Type the job roles and locations you want to search.
-        3. Hit **Start Search** and wait for the results.
-        4. Download your personalised Excel spreadsheet.
+        This app uses your LinkedIn session cookie to search on your behalf — no password is ever sent anywhere.
 
-        > **Note:** Use this tool responsibly and in accordance with
-        > [LinkedIn's Terms of Service](https://www.linkedin.com/legal/user-agreement).
+        **Steps to copy your `li_at` cookie:**
+
+        1. Open **[linkedin.com](https://www.linkedin.com)** in your browser and make sure you're logged in.
+        2. Open **Developer Tools** — press `F12` (Windows/Linux) or `Cmd+Option+I` (Mac).
+        3. Go to the **Application** tab (Chrome) or **Storage** tab (Firefox).
+        4. In the left sidebar click **Cookies → https://www.linkedin.com**.
+        5. Find the cookie named **`li_at`**, click it, and copy the full value from the bottom panel.
+        6. Paste it in the field below.
+
+        > The cookie is only used for this session and is never stored.
         """
     )
 
 with st.form("search_form"):
-    st.subheader("🔐 LinkedIn Login")
-    col1, col2 = st.columns(2)
-    with col1:
-        email = st.text_input("Email", placeholder="you@example.com")
-    with col2:
-        password = st.text_input("Password", type="password", placeholder="••••••••")
+    st.subheader("🔐 LinkedIn Session Cookie")
+    li_at = st.text_input(
+        "li_at cookie value",
+        type="password",
+        placeholder="Paste your li_at cookie here…",
+        help="Found in browser DevTools → Application → Cookies → linkedin.com → li_at",
+    )
 
     st.subheader("🎯 Search Settings")
     roles_input = st.text_input(
@@ -459,8 +457,8 @@ if submitted:
     roles = [r.strip() for r in roles_input.split(",") if r.strip()]
     locations = [loc.strip() for loc in locations_input.split(",") if loc.strip()]
 
-    if not email or not password:
-        st.error("Please enter your LinkedIn email and password.")
+    if not li_at:
+        st.error("Please paste your LinkedIn li_at cookie value.")
     elif not roles:
         st.error("Please enter at least one job role.")
     elif not locations:
@@ -481,7 +479,7 @@ if submitted:
 
         with st.spinner("Running search — this may take a few minutes…"):
             jobs = run_scraper(
-                email, password, roles, locations,
+                li_at, roles, locations,
                 int(max_jobs), int(max_pages), log_fn,
             )
 
