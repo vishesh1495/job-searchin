@@ -298,12 +298,17 @@ def run_scraper(
     all_jobs: List[JobRow] = []
 
     with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            "/tmp/linkedin_playwright_profile",
+        browser = p.chromium.launch(
             headless=True,
-            viewport={"width": 1440, "height": 1000},
-            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--single-process",
+            ],
         )
+        context = browser.new_context(viewport={"width": 1440, "height": 1000})
         page = context.new_page()
 
         if not is_logged_in(page):
@@ -389,6 +394,7 @@ def run_scraper(
                 log_fn(f"✅ {len(role_jobs)} jobs found for **{role}** in **{location}**.\n")
 
         context.close()
+        browser.close()
 
     return all_jobs
 
