@@ -289,21 +289,6 @@ def is_logged_in(page) -> bool:
         return False
 
 
-def authenticate(page, li_at: str) -> bool:
-    """Inject the li_at session cookie — avoids login forms and CAPTCHA entirely."""
-    try:
-        page.goto("https://www.linkedin.com", wait_until="domcontentloaded", timeout=30000)
-        page.context.add_cookies([{
-            "name": "li_at",
-            "value": li_at.strip(),
-            "domain": ".linkedin.com",
-            "path": "/",
-        }])
-        return is_logged_in(page)
-    except Exception:
-        return False
-
-
 # ─── Main scraper ─────────────────────────────────────────────────────────────
 def run_scraper(
     li_at: str,
@@ -323,12 +308,39 @@ def run_scraper(
                 "--disable-gpu",
             ],
         )
-        context = browser.new_context(viewport={"width": 1440, "height": 1000})
+
+        # Set cookies at context level BEFORE any page is created — this prevents
+        # redirect loops caused by missing session data on first navigation.
+        context = browser.new_context(
+            viewport={"width": 1440, "height": 1000},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+        )
+        context.add_cookies([
+            {
+                "name": "li_at",
+                "value": li_at.strip(),
+                "domain": ".linkedin.com",
+                "path": "/",
+                "secure": True,
+                "httpOnly": True,
+            },
+            {
+                # Prevent LinkedIn from redirecting based on language/locale
+                "name": "lang",
+                "value": "v=2&lang=en-us",
+                "domain": ".linkedin.com",
+                "path": "/",
+            },
+        ])
         page = context.new_page()
 
-        log_fn("🔑 Authenticating with LinkedIn…")
-        if not authenticate(page, li_at):
-            log_fn("❌ Authentication failed. Your cookie may be expired or incorrect. Please copy it again.")
+        log_fn("🔑 Verifying LinkedIn session…")
+        if not is_logged_in(page):
+            log_fn("❌ Authentication failed. Your li_at cookie may be expired — please copy it again from your browser.")
             context.close()
             browser.close()
             return all_jobs
